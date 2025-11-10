@@ -31,7 +31,7 @@ enum PhysicBodyType
 {
 	CIRCLE,
 	BOX,
-	HALFPLANE
+	HALFSPACE
 };
 
 //Each individual physic body
@@ -90,17 +90,17 @@ public:
 	}
 };
 
-class PhysicsBodyHalfplane : public PhysicsBody {
+class PhysicsBodyHalfspace : public PhysicsBody {
 	float radius = 10;
 	float rotation = 0;
 	Vector2 normal = { 0, -1 };
-	PhysicBodyType type = HALFPLANE;
+	PhysicBodyType type = HALFSPACE;
 
 public:
 	void setRotation(float rotationDegrees)
 	{
 		rotation = rotationDegrees;
-		normal = Vector2Rotate({ 0, -1 }, rotation);
+		normal = Vector2Rotate({ 0, -1 }, rotation * DEG2RAD);
 	}
 
 	float getRotation()
@@ -117,7 +117,7 @@ public:
 	{
 		DrawCircleV(position, radius, color);
 		DrawLineEx(position, position + normal * 30, 1, color);
-		Vector2 parellelToSurface = Vector2Rotate(normal, rotation * DEG2RAD);
+		Vector2 parellelToSurface = Vector2Rotate(normal, PI * 0.5f);
 		DrawLineEx(position - parellelToSurface * 4000, position + parellelToSurface * 4000, 1, color);
 	}
 
@@ -132,24 +132,52 @@ bool CircleOverlap(PhysicsBodyCircle* circleA, PhysicsBodyCircle* circleB)
 	Vector2 ABDisplacement = circleB->position - circleA->position;
 	float distance = Vector2Length(ABDisplacement);
 	float radiiSum = circleA->radius + circleB->radius;
+	float overlap = radiiSum - distance;
 
-	return radiiSum > distance; //True if radii is greater, false otherwise
+	if (overlap > 0) //True if radii is greater, false otherwise
+	{
+		Vector2 normalAB;
+		if (abs(distance) < 0.00001f)
+		{
+			normalAB = { 0, 1 };
+		}
+		else normalAB = ABDisplacement / distance;
+		Vector2 mtv = normalAB * overlap;
+
+		if (!circleA->isStatic)
+		{
+			circleA->position -= mtv * 0.5f;
+		}
+		else circleB->position += mtv * 0.5f;
+		return true;
+	}
+	else return false;
 }
 
-bool CircleHalfplaneOverlap(PhysicsBodyCircle* circle, PhysicsBodyHalfplane* plane)
+bool CircleHalfspaceOverlap(PhysicsBodyCircle* circle, PhysicsBodyHalfspace* halfspace)
 {
 	//More to finish
-	
-	Vector2 circleDisplacement = circle->position - plane->position;
-	float dot = Vector2DotProduct(circleDisplacement, plane->getNormal());
-	Vector2 vectorProjection = plane->getNormal() * dot;
+	if (!circle->isStatic)
+	{
+		Vector2 circleDisplacement = circle->position - halfspace->position;
+		float dot = Vector2DotProduct(circleDisplacement, halfspace->getNormal());
+		Vector2 vectorProjection = halfspace->getNormal() * dot;
 
-	DrawLineEx(circle->position, plane->position, 1, GRAY);
+		DrawLineEx(circle->position, halfspace->position, 1, GRAY);
 
-	Vector2 midpoint = circle->position - vectorProjection * 0.5f;
-	DrawText(TextFormat("D: %6.0f", dot), midpoint.x + 10, midpoint.y + 10, 30, LIGHTGRAY);
+		Vector2 midpoint = circle->position - vectorProjection * 0.5f;
+		DrawText(TextFormat("D: %6.0f", dot), midpoint.x + 10, midpoint.y + 10, 30, LIGHTGRAY);
 
-	return dot < circle->radius;
+		float overlap = circle->radius - dot;
+
+		if (overlap > 0)
+		{
+			Vector2 mtv = halfspace->getNormal() * overlap;
+			circle->position += mtv;
+			return true;
+		}
+		else return false;
+	}
 }
 
 //Simulation control
@@ -205,13 +233,13 @@ public:
 				{
 					overlapping = CircleOverlap((PhysicsBodyCircle*)objPointerA, (PhysicsBodyCircle*)objPointerB);
 				}
-				else if (shapeA == HALFPLANE && shapeB == CIRCLE)
+				else if (shapeA == HALFSPACE && shapeB == CIRCLE)
 				{
-					overlapping = CircleHalfplaneOverlap((PhysicsBodyCircle*)objPointerB, (PhysicsBodyHalfplane*)objPointerA);
+					overlapping = CircleHalfspaceOverlap((PhysicsBodyCircle*)objPointerB, (PhysicsBodyHalfspace*)objPointerA);
 				}
-				else if (shapeA == CIRCLE && shapeB == HALFPLANE)
+				else if (shapeA == CIRCLE && shapeB == HALFSPACE)
 				{
-					overlapping = CircleHalfplaneOverlap((PhysicsBodyCircle*)objPointerA, (PhysicsBodyHalfplane*)objPointerB);
+					overlapping = CircleHalfspaceOverlap((PhysicsBodyCircle*)objPointerA, (PhysicsBodyHalfspace*)objPointerB);
 				}
 
 				if (overlapping)
@@ -225,7 +253,8 @@ public:
 };
 
 PhysicsSim simulation; //Create simulation container
-PhysicsBodyHalfplane halfplane;
+PhysicsBodyHalfspace halfspace;
+PhysicsBodyHalfspace halfspace2;
 
 //Disintegrate bodies below or above screen height
 void cleanup()
@@ -282,12 +311,12 @@ void drawScene()
 	GuiSliderBar(Rectangle{ 10, 70, 500, 40 }, "", TextFormat("Angle: %.0f Degrees", launchAngle), &launchAngle, -180, 180);
 	GuiSliderBar(Rectangle{ 10, 130, 500, 40 }, "", TextFormat("Gravitas: %.0f Pixels/sec^2", simulation.accelGrav.y), &simulation.accelGrav.y, -1000, 1000);
 
-	GuiSliderBar(Rectangle{ 10, 190, 500, 40 }, "", TextFormat("Halfplane X: %.0f", halfplane.position.x), &halfplane.position.x, 0, winWidth);
-	GuiSliderBar(Rectangle{ 10, 250, 500, 40 }, "", TextFormat("Halfplane Y: %.0f", halfplane.position.y), &halfplane.position.y, 0, winHeight);
+	GuiSliderBar(Rectangle{ 10, 190, 500, 40 }, "", TextFormat("Halfspace X: %.0f", halfspace.position.x), &halfspace.position.x, 0, winWidth);
+	GuiSliderBar(Rectangle{ 10, 250, 500, 40 }, "", TextFormat("Halfspace Y: %.0f", halfspace.position.y), &halfspace.position.y, 0, winHeight);
 
-	float halfPlaneAngle = halfplane.getRotation();
-	GuiSliderBar(Rectangle{ 10, 310, 500, 40 }, "", TextFormat("Halfplane rotation: %.0f", halfPlaneAngle), &halfPlaneAngle, -180, 180);
-	halfplane.setRotation(halfPlaneAngle);
+	float halfspaceAngle = halfspace.getRotation();
+	GuiSliderBar(Rectangle{ 10, 310, 500, 40 }, "", TextFormat("Halfspace rotation: %.0f", halfspaceAngle), &halfspaceAngle, -180, 180);
+	halfspace.setRotation(halfspaceAngle);
 
 	// Draw scene
 	ClearBackground(SKYBLUE);
@@ -311,15 +340,27 @@ void drawScene()
 	EndDrawing();
 }
 
+PhysicsBodyCircle circle;
+
 int main()
 {
 	InitWindow(winWidth, winHeight, "Test");
 	SetTargetFPS(FRAMERATE);
 
 	launchPos = { 100, (float)GetScreenHeight() - 100 };
-	halfplane.isStatic = true;
-	halfplane.position = { winWidth / 2, winHeight / 2 };
-	simulation.add(&halfplane);
+
+	halfspace.isStatic = true;
+	halfspace.position = { winWidth / 2, winHeight / 2 };
+	simulation.add(&halfspace);
+
+	halfspace2.isStatic = true;
+	halfspace2.position = { winWidth / 2, winHeight / 2 };
+	halfspace2.setRotation(45);
+	simulation.add(&halfspace2);
+
+	circle.isStatic = true;
+	circle.position = { (winHeight / 2) + 500, (winHeight / 2) - 100 };
+	simulation.add(&circle);
 
 	while (!WindowShouldClose()) 
 	{
